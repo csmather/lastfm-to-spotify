@@ -36,6 +36,15 @@ token is cached in `.spotify_cache` so you only do this once.
 
 Any tracks that don't match on Spotify get printed at the end.
 
-## Later (not built yet)
-Each track keeps its Last.fm "date loved" timestamp (`LovedTrack.uts`), so filtering
-to "loved since <date>" into its own playlist is a small addition.
+### Filter by date loved
+Make a playlist from only the tracks you loved in a date range:
+
+```bash
+python loved_to_spotify.py --since 2025-01-01
+python loved_to_spotify.py --since 2025-01-01 --until 2025-06-30
+python loved_to_spotify.py --since 2025-01-01 --name "Loved this year"
+```
+
+Dates are `YYYY-MM-DD` (interpreted as local midnight). When a range is given, it's
+appended to the playlist name automatically so dated playlists stay distinct. Tracks
+with no Last.fm "date loved" timestamp are skipped while filtering.

@@ -11,10 +11,13 @@ LovedTrack.uts) so a future "loved since <date>" filter is a one-liner — not
 wired up yet, on purpose.
 """
 
+import argparse
 import os
 import sys
 import time
+from datetime import datetime
 from dataclasses import dataclass
+from typing import NoReturn
 
 import requests
 import spotipy
@@ -41,9 +44,40 @@ class LovedTrack:
     uts: int  # unix timestamp of when you loved it (0 if missing)
 
 
-def die(msg: str) -> None:
+def die(msg: str) -> NoReturn:
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def parse_date(s: str) -> int:
+    """Parse a YYYY-MM-DD date (local midnight) into a unix timestamp."""
+    try:
+        return int(datetime.strptime(s, "%Y-%m-%d").timestamp())
+    except ValueError:
+        die(f"bad date {s!r} — use YYYY-MM-DD")
+
+
+def filter_by_date(
+    tracks: list["LovedTrack"], since: int | None, until: int | None
+) -> list["LovedTrack"]:
+    """Keep tracks loved within [since, until]. Tracks with no date are dropped
+    only when a bound is active (we can't place them on a timeline)."""
+    if since is None and until is None:
+        return tracks
+    kept = []
+    undated = 0
+    for t in tracks:
+        if not t.uts:
+            undated += 1
+            continue
+        if since is not None and t.uts < since:
+            continue
+        if until is not None and t.uts > until:
+            continue
+        kept.append(t)
+    if undated:
+        print(f"  (skipped {undated} track(s) with no 'date loved' timestamp)")
+    return kept
 
 
 def check_config() -> None:
@@ -132,14 +166,58 @@ def find_spotify_uri(sp: spotipy.Spotify, track: LovedTrack) -> str | None:
     return None
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Import Last.fm loved tracks into a new Spotify playlist."
+    )
+    p.add_argument(
+        "--since",
+        metavar="YYYY-MM-DD",
+        help="only include tracks loved on/after this date",
+    )
+    p.add_argument(
+        "--until",
+        metavar="YYYY-MM-DD",
+        help="only include tracks loved on/before this date",
+    )
+    p.add_argument(
+        "--name",
+        help="playlist name (default: PLAYLIST_NAME env, with date range appended)",
+    )
+    return p.parse_args()
+
+
+def build_playlist_name(base: str, since: str | None, until: str | None) -> str:
+    if since and until:
+        return f"{base} ({since} to {until})"
+    if since:
+        return f"{base} (since {since})"
+    if until:
+        return f"{base} (until {until})"
+    return base
+
+
 def main() -> None:
+    args = parse_args()
     check_config()
+
+    since_ts = parse_date(args.since) if args.since else None
+    until_ts = parse_date(args.until) if args.until else None
+    if since_ts and until_ts and since_ts > until_ts:
+        die("--since is after --until")
 
     print("Fetching loved tracks from Last.fm...")
     loved = get_loved_tracks()
     if not loved:
         die("no loved tracks found")
-    print(f"Got {len(loved)} loved tracks.\n")
+    print(f"Got {len(loved)} loved tracks.")
+
+    loved = filter_by_date(loved, since_ts, until_ts)
+    if not loved:
+        die("no loved tracks in that date range")
+    if since_ts or until_ts:
+        print(f"{len(loved)} track(s) in range.")
+    print()
 
     print("Authorizing with Spotify (a browser window may open)...")
     sp = spotify_client()
@@ -162,12 +240,18 @@ def main() -> None:
     if not uris:
         die("nothing matched on Spotify — check your keys / market")
 
-    print(f"\nCreating playlist '{PLAYLIST_NAME}'...")
+    base_name = args.name or PLAYLIST_NAME
+    playlist_name = build_playlist_name(base_name, args.since, args.until)
+    desc = "Imported from Last.fm loved tracks"
+    if args.since or args.until:
+        desc += f" ({args.since or 'start'} to {args.until or 'now'})"
+
+    print(f"\nCreating playlist '{playlist_name}'...")
     playlist = sp.user_playlist_create(
         user=user_id,
-        name=PLAYLIST_NAME,
+        name=playlist_name,
         public=False,
-        description="Imported from Last.fm loved tracks",
+        description=desc,
     )
     playlist_id = playlist["id"]
 
@@ -176,7 +260,7 @@ def main() -> None:
         sp.playlist_add_items(playlist_id, uris[i : i + 100])
         print(f"  added {min(i + 100, len(uris))}/{len(uris)}")
 
-    print(f"\nDone. Added {len(uris)} tracks to '{PLAYLIST_NAME}'.")
+    print(f"\nDone. Added {len(uris)} tracks to '{playlist_name}'.")
     print(f"Open it: {playlist['external_urls']['spotify']}")
 
     if misses:
