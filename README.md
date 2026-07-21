@@ -34,7 +34,14 @@ a `127.0.0.1:8888` URL that won't load anything — that's fine, just copy the f
 URL from the address bar and paste it back into the terminal if prompted. The auth
 token is cached in `.spotify_cache` so you only do this once.
 
-Any tracks that don't match on Spotify get printed at the end.
+Each Spotify search result is validated against the loved track's title and artist
+(fuzzy match), because Spotify returns a best-effort hit for *anything* — so a track
+that isn't on Spotify would otherwise get a wrong substitute. Results that don't
+clear the confidence bar are treated as "no match" and skipped. Two lists print at
+the end:
+
+- **low-confidence matches** — added, but shows what Spotify picked so you can eyeball it
+- **no Spotify match** — skipped entirely (e.g. tracks genuinely not on Spotify)
 
 ### Filter by date loved
 Make a playlist from only the tracks you loved in a date range:

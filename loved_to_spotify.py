@@ -13,8 +13,10 @@ wired up yet, on purpose.
 
 import argparse
 import os
+import re
 import sys
 import time
+from difflib import SequenceMatcher
 from datetime import datetime
 from dataclasses import dataclass
 from typing import NoReturn
@@ -148,22 +150,68 @@ def spotify_client() -> spotipy.Spotify:
     return spotipy.Spotify(auth_manager=auth)
 
 
-def find_spotify_uri(sp: spotipy.Spotify, track: LovedTrack) -> str | None:
-    """Search Spotify for a loved track; return the best-guess track URI."""
-    # Field-scoped query first (most precise), then a loose fallback.
+# Confidence thresholds for accepting a Spotify search result. Below ACCEPT the
+# result is treated as "not on Spotify" (Spotify's search returns a best-effort
+# hit for anything, so an unvalidated top result is often a wrong substitute).
+ACCEPT_SCORE = 0.55  # min combined artist+title similarity to count as a match
+REVIEW_SCORE = 0.72  # matches below this are flagged for a human eyeball
+
+
+def _normalize(s: str) -> str:
+    """Lowercase, drop parenthetical/bracketed noise (feat., remaster, etc.),
+    strip punctuation to spaces, and collapse whitespace."""
+    s = s.lower()
+    s = re.sub(r"[\(\[].*?[\)\]]", " ", s)  # (feat. X), [Remastered], ...
+    s = re.sub(r"\bfeat\.?\b.*", " ", s)  # trailing "feat ..." with no parens
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return " ".join(s.split())
+
+
+def _sim(a: str, b: str) -> float:
+    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+
+
+def _score_candidate(track: LovedTrack, item: dict) -> float:
+    """Combined confidence that `item` is `track`: title similarity blended with
+    the best similarity across the candidate's (possibly multiple) artists."""
+    title_sim = _sim(track.name, item.get("name", ""))
+    artists = [a.get("name", "") for a in item.get("artists", [])]
+    artist_sim = max((_sim(track.artist, a) for a in artists), default=0.0)
+    return 0.5 * title_sim + 0.5 * artist_sim
+
+
+@dataclass
+class Match:
+    uri: str
+    score: float
+    label: str  # "Artist - Title" of the chosen Spotify track, for review output
+
+
+def find_spotify_match(sp: spotipy.Spotify, track: LovedTrack) -> Match | None:
+    """Search Spotify, validate candidates against the loved track, and return the
+    best one that clears ACCEPT_SCORE — or None if nothing is close enough."""
+    candidates: dict[str, dict] = {}  # uri -> item, deduped across queries
     for query in (
         f'track:"{track.name}" artist:"{track.artist}"',
         f"{track.name} {track.artist}",
     ):
         try:
-            res = sp.search(q=query, type="track", limit=1)
+            res = sp.search(q=query, type="track", limit=5)
         except spotipy.SpotifyException as e:
             print(f"  ! search failed for {track.artist} - {track.name}: {e}")
             return None
-        items = res.get("tracks", {}).get("items", [])
-        if items:
-            return items[0]["uri"]
-    return None
+        for item in res.get("tracks", {}).get("items", []):
+            candidates[item["uri"]] = item
+
+    if not candidates:
+        return None
+
+    best = max(candidates.values(), key=lambda it: _score_candidate(track, it))
+    score = _score_candidate(track, best)
+    if score < ACCEPT_SCORE:
+        return None
+    artists = ", ".join(a.get("name", "") for a in best.get("artists", []))
+    return Match(uri=best["uri"], score=score, label=f"{artists} - {best.get('name', '')}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -228,10 +276,13 @@ def main() -> None:
     print("Matching tracks on Spotify...")
     uris: list[str] = []
     misses: list[LovedTrack] = []
+    review: list[tuple[LovedTrack, Match]] = []  # accepted but low-confidence
     for i, t in enumerate(loved, 1):
-        uri = find_spotify_uri(sp, t)
-        if uri:
-            uris.append(uri)
+        match = find_spotify_match(sp, t)
+        if match:
+            uris.append(match.uri)
+            if match.score < REVIEW_SCORE:
+                review.append((t, match))
         else:
             misses.append(t)
         if i % 25 == 0 or i == len(loved):
@@ -263,8 +314,16 @@ def main() -> None:
     print(f"\nDone. Added {len(uris)} tracks to '{playlist_name}'.")
     print(f"Open it: {playlist['external_urls']['spotify']}")
 
+    if review:
+        print(
+            f"\n{len(review)} low-confidence match(es) — added, but worth checking "
+            f"(Last.fm loved -> Spotify picked):"
+        )
+        for t, m in review:
+            print(f"  ? {t.artist} - {t.name}  ->  {m.label}  ({m.score:.0%})")
+
     if misses:
-        print(f"\n{len(misses)} track(s) had no Spotify match:")
+        print(f"\n{len(misses)} track(s) had no Spotify match (skipped):")
         for t in misses:
             print(f"  - {t.artist} - {t.name}")
 
