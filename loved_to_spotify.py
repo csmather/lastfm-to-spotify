@@ -32,7 +32,9 @@ LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 LASTFM_USER = os.getenv("LASTFM_USER")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
+SPOTIFY_REDIRECT_URI = os.getenv(
+    "SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback"
+)
 
 PLAYLIST_NAME = os.getenv("PLAYLIST_NAME", "Last.fm Loved Tracks")
 
@@ -211,7 +213,9 @@ def find_spotify_match(sp: spotipy.Spotify, track: LovedTrack) -> Match | None:
     if score < ACCEPT_SCORE:
         return None
     artists = ", ".join(a.get("name", "") for a in best.get("artists", []))
-    return Match(uri=best["uri"], score=score, label=f"{artists} - {best.get('name', '')}")
+    return Match(
+        uri=best["uri"], score=score, label=f"{artists} - {best.get('name', '')}"
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -293,7 +297,7 @@ def main() -> None:
 
     base_name = args.name or PLAYLIST_NAME
     playlist_name = build_playlist_name(base_name, args.since, args.until)
-    desc = "Imported from Last.fm loved tracks"
+    desc = "https://github.com/csmather/lastfm-to-spotify"
     if args.since or args.until:
         desc += f" ({args.since or 'start'} to {args.until or 'now'})"
 
