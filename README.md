@@ -5,7 +5,7 @@ Pulls all your Last.fm **loved tracks** and dumps them into one new Spotify play
 ## Setup
 
 ```bash
-cd ~/projects/random/lastfm-to-spotify
+git clone <this-repo-url> && cd lastfm-to-spotify
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in your keys
