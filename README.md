@@ -4,23 +4,44 @@ Pulls all your Last.fm **loved tracks** and dumps them into one new Spotify play
 
 ## Setup
 
+### 1. Clone and install
+
 ```bash
-git clone <this-repo-url> && cd lastfm-to-spotify
+git clone https://github.com/csmather/lastfm-to-spotify && cd lastfm-to-spotify
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # then fill in your keys
+cp .env.example .env
 ```
 
-### Spotify app redirect URI
-In your Spotify app settings (https://developer.spotify.com/dashboard), add this
-exact Redirect URI:
+You'll fill in `.env` with keys from the next two steps.
 
-```
-http://127.0.0.1:8888/callback
-```
+### 2. Get Last.fm API credentials
 
-Spotify requires `127.0.0.1` (not `localhost`). It must match `SPOTIFY_REDIRECT_URI`
-in `.env` character-for-character.
+1. Create an API account at https://www.last.fm/api/account/create (log in first;
+   the "callback URL" field can be left blank — this tool doesn't use it).
+2. Copy the **API key** it gives you into `LASTFM_API_KEY` in `.env`.
+3. Set `LASTFM_USER` to your Last.fm username (the one whose loved tracks you want).
+
+Your loved tracks are public, so no Last.fm login/authorization is needed at runtime.
+
+### 3. Get Spotify API credentials
+
+1. Go to the dashboard at https://developer.spotify.com/dashboard and **Create app**
+   (any name/description; check the Web API box if asked).
+2. From the app's **Settings**, copy the **Client ID** and **Client secret** into
+   `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env`.
+3. Still in Settings, add this exact **Redirect URI** and save:
+
+   ```
+   http://127.0.0.1:8888/callback
+   ```
+
+   Spotify requires `127.0.0.1` (not `localhost`), and it must match
+   `SPOTIFY_REDIRECT_URI` in `.env` character-for-character. Leave the default in
+   `.env` as-is unless you change it here too.
+
+Creating a playlist requires *your* authorization, so the first run opens a browser
+to log in (handled in **Run** below).
 
 ## Run
 
