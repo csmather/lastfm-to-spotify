@@ -2,13 +2,12 @@
 """
 Pull your Last.fm "loved tracks" and dump them all into one new Spotify playlist.
 
-Minimal first build: grabs every loved track, matches each to a Spotify track,
-creates a fresh playlist, and adds the matches. Unmatched tracks are printed at
-the end so you can eyeball them.
+Grabs every loved track, matches each to a Spotify track (validating the result so
+tracks not on Spotify don't get silent wrong substitutes), creates a fresh playlist,
+and adds the matches. Low-confidence and unmatched tracks are printed at the end.
 
-The Last.fm 'date loved' timestamp is parsed and kept on each track (see
-LovedTrack.uts) so a future "loved since <date>" filter is a one-liner — not
-wired up yet, on purpose.
+Use --since / --until (YYYY-MM-DD) to build a playlist from only the tracks you
+loved in a date range.
 """
 
 import argparse
@@ -155,22 +154,32 @@ def spotify_client() -> spotipy.Spotify:
 # Confidence thresholds for accepting a Spotify search result. Below ACCEPT the
 # result is treated as "not on Spotify" (Spotify's search returns a best-effort
 # hit for anything, so an unvalidated top result is often a wrong substitute).
-ACCEPT_SCORE = 0.55  # min combined artist+title similarity to count as a match
-REVIEW_SCORE = 0.72  # matches below this are flagged for a human eyeball
+# Values calibrated against a real 225-track loved list: every wrong match scored
+# <= 0.66 (e.g. a same-title-different-artist hit at 0.66, a same-artist-wrong-song
+# at 0.59), while every correct match scored >= 0.91. 0.75 sits in that gap. The
+# one known casualty is artist abbreviations (e.g. "TEED" for the full band name),
+# which score ~0.60 and get skipped — re-add those by hand if you care.
+ACCEPT_SCORE = 0.75  # min combined artist+title similarity to count as a match
+REVIEW_SCORE = 0.88  # accepted matches below this are flagged for a human eyeball
 
 
 def _normalize(s: str) -> str:
-    """Lowercase, drop parenthetical/bracketed noise (feat., remaster, etc.),
-    strip punctuation to spaces, and collapse whitespace."""
-    s = s.lower()
+    """Casefold, drop parenthetical/bracketed noise (feat., remaster, etc.), strip
+    punctuation/symbols to spaces, and collapse whitespace. Unicode letters/digits
+    of any script are KEPT — an ASCII-only strip collapses every non-Latin name to
+    '' and makes unrelated CJK/Cyrillic names score as identical."""
+    s = s.casefold()
     s = re.sub(r"[\(\[].*?[\)\]]", " ", s)  # (feat. X), [Remastered], ...
     s = re.sub(r"\bfeat\.?\b.*", " ", s)  # trailing "feat ..." with no parens
-    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"[^\w\s]", " ", s)  # keep \w = unicode letters/digits/underscore
     return " ".join(s.split())
 
 
 def _sim(a: str, b: str) -> float:
-    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+    na, nb = _normalize(a), _normalize(b)
+    if not na or not nb:  # two empty normalizations must NOT score a perfect 1.0
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
 
 
 def _score_candidate(track: LovedTrack, item: dict) -> float:
