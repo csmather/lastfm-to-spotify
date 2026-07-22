@@ -1,5 +1,6 @@
 .env
 .spotify_cache
+.cache
 .venv/
 __pycache__/
 scores.tsv
